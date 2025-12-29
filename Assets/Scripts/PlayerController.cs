@@ -7,13 +7,12 @@ public class PlayerController : MonoBehaviour
     public float yurumeHizi = 3.0f;
     public float kosmaHizi = 6.0f;
     public float ziplamaGucu = 1.5f;
-    public float yerCekimi = -15.0f; // Daha tok düşüş için artırdık
+    public float yerCekimi = -15.0f;
 
-    [Header("Kamera ve Kafa Ayarları")]
+    [Header("Kamera ve Kafa")]
     public Camera playerCamera;
-    public Transform kafaKemigi; // BURASI YENİ: Mixamo:Head kemiğini buraya atacağız
-    public Vector3 kameraOffset = new Vector3(0, 0.1f, 0.2f); // İnce ayar için
-    
+    public Transform kafaKemigi;
+    public Vector3 kameraOffset = new Vector3(0, 0.15f, 0.2f);
     public float fareHassasiyeti = 2.0f;
     public float bakisSiniri = 85.0f;
 
@@ -22,8 +21,11 @@ public class PlayerController : MonoBehaviour
 
     private CharacterController controller;
     private Vector3 velocity;
-    private bool isGrounded;
+    private bool isGrounded; // Bizim kontrol ettiğimiz güvenli değişken
     private float xRotation = 0f;
+
+    // KÖR NOKTA AYARLARI (Sorunu çözecek kısım)
+    private float zeminKilitZamani = 0f; // Ne zamana kadar yeri algılamayalım?
 
     void Start()
     {
@@ -34,64 +36,87 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        // 1. Fizik ve Hareket İşlemleri
-        isGrounded = controller.isGrounded;
-        if (isGrounded && velocity.y < 0) velocity.y = -2f;
+        // 1. ZEMİN KONTROLÜ (GELİŞMİŞ)
+        bool unityDiyorKiYerdeyiz = controller.isGrounded;
 
+        // Eğer zıpladıktan sonraki o 0.2 saniyelik "Körlük" süresi dolmadıysa...
+        if (Time.time < zeminKilitZamani)
+        {
+            isGrounded = false; // Yere değse bile havada say! (Animasyonu korumak için)
+        }
+        else
+        {
+            // Süre dolduysa Unity'nin dediğine güvenebiliriz
+            isGrounded = unityDiyorKiYerdeyiz;
+        }
+
+        // Yere tam bastığımızda dikey hızı sıfırla (Karakterin yere yapışması için)
+        if (isGrounded && velocity.y < 0)
+        {
+            velocity.y = -2f;
+            // Yerdeyken Trigger takılı kalmasın diye sürekli temizle
+            animator.ResetTrigger("Jump"); 
+        }
+
+        // 2. HAREKET
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
         bool hareketEdiyor = new Vector3(x, 0, z).sqrMagnitude > 0.01f;
-        
-        // Yön hesapla (Kamera yönüne göre değil, vücut yönüne göre hareket)
+
         Vector3 move = transform.right * x + transform.forward * z;
-        
         bool kosuyorMu = Input.GetKey(KeyCode.LeftShift) && z > 0;
         float currentSpeed = kosuyorMu ? kosmaHizi : yurumeHizi;
 
         controller.Move(move * currentSpeed * Time.deltaTime);
 
-        // Zıplama
+        // 3. ZIPLAMA KOMUTU
         if (Input.GetButtonDown("Jump") && isGrounded)
         {
+            // Fiziksel zıplama
             velocity.y = Mathf.Sqrt(ziplamaGucu * -2f * yerCekimi);
+            
+            // Animasyonu tetikle
             animator.SetTrigger("Jump");
+
+            // KRİTİK NOKTA: Zıpladığım an, 0.3 saniye boyunca zemin kontrolünü kilitle!
+            // Bu süre boyunca isGrounded ASLA true olamaz.
+            // Böylece animasyon yarıda kesilip başa saramaz.
+            zeminKilitZamani = Time.time + 0.3f; 
         }
 
+        // 4. YERÇEKİMİ
         velocity.y += yerCekimi * Time.deltaTime;
         controller.Move(velocity * Time.deltaTime);
 
-        // Animasyon
+        // 5. ANİMASYON GÜNCELLEME
         UpdateAnimations(x, z, kosuyorMu, hareketEdiyor);
     }
 
-    // Tüm Kamera ve Kafa Takip İşlemleri Burada (Titremeyi önlemek için LateUpdate)
     void LateUpdate()
     {
-        // 1. Mouse ile Etrafa Bakma (Rotasyon)
+        // Kamera Takibi
         float mouseX = Input.GetAxis("Mouse X") * fareHassasiyeti;
         float mouseY = Input.GetAxis("Mouse Y") * fareHassasiyeti;
 
         xRotation -= mouseY;
         xRotation = Mathf.Clamp(xRotation, -bakisSiniri, bakisSiniri);
 
-        // Kamerayı döndür
         playerCamera.transform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
-        // Vücudu döndür
         transform.Rotate(Vector3.up * mouseX);
 
-        // 2. KAFA KEMİĞİNİ TAKİP ETME (Pozisyon Kilitleme)
         if (kafaKemigi != null)
         {
-            // Kameranın pozisyonunu, kafa kemiğinin olduğu yere ışınla + Offset ekle
-            // TransformDirection kullanıyoruz ki karakter dönerse offset de dönsün
             playerCamera.transform.position = kafaKemigi.position + transform.TransformDirection(kameraOffset);
         }
     }
 
     void UpdateAnimations(float x, float z, bool isRunning, bool isMoving)
     {
+        // Hız değerini ayarla
         float targetAnimValue = isMoving ? (isRunning ? 1.0f : 0.5f) : 0f;
         animator.SetFloat("Speed", targetAnimValue, 0.1f, Time.deltaTime);
+        
+        // Yere basma bilgisini animatöre gönder
         animator.SetBool("IsGrounded", isGrounded);
     }
 }
